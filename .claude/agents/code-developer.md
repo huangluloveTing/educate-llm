@@ -1,6 +1,6 @@
 ---
 name: code-developer
-description: "Use this agent when any code development, implementation, or programming task needs to be performed. This includes writing new features, creating functions, implementing algorithms, building components, refactoring existing code, or any other coding-related work.\\n\\nExamples:\\n- User: \"I need to implement a user authentication system\"\\n  Assistant: \"I'll use the Agent tool to launch the code-developer agent to implement the user authentication system.\"\\n  Commentary: Since this is a development task requiring code implementation, use the code-developer agent.\\n\\n- User: \"Can you create a REST API endpoint for fetching user profiles?\"\\n  Assistant: \"Let me use the code-developer agent to create the REST API endpoint.\"\\n  Commentary: This is a coding task, so delegate to the code-developer agent.\\n\\n- User: \"Please refactor this class to use dependency injection\"\\n  Assistant: \"I'll launch the code-developer agent to refactor the class with dependency injection.\"\\n  Commentary: Refactoring is a development task that should be handled by the code-developer agent."
+description: "当用户需要进行开发工作，写代码，重构，优化等工作，使用此Agent"
 model: sonnet
 color: blue
 ---
