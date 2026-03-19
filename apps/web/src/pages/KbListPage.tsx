@@ -1,5 +1,6 @@
 import { Button, Card, Form, Input, List, Modal, Typography, message } from "antd";
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { apiFetch } from "../lib/api";
 
@@ -8,6 +9,8 @@ type Kb = { id: string; name: string; description?: string | null };
 export default function KbListPage() {
   const [items, setItems] = useState<Kb[]>([]);
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+  const navigate = useNavigate();
 
   async function refresh() {
     const data = await apiFetch<Kb[]>("/kb");
@@ -33,7 +36,13 @@ export default function KbListPage() {
         <List
           dataSource={items}
           renderItem={(kb) => (
-            <List.Item>
+            <List.Item
+              actions={[
+                <Button key="docs" type="link" onClick={() => navigate(`/kb/${kb.id}/documents`)}>
+                  文档管理
+                </Button>,
+              ]}
+            >
               <List.Item.Meta title={kb.name} description={kb.description || "-"} />
             </List.Item>
           )}

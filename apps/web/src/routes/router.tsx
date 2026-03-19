@@ -3,6 +3,7 @@ import { createBrowserRouter, redirect } from "react-router-dom";
 import AppLayout from "../layouts/AppLayout";
 import ChatPage from "../pages/ChatPage";
 import KbListPage from "../pages/KbListPage";
+import DocumentsPage from "../pages/DocumentsPage";
 import LoginPage from "../pages/LoginPage";
 import NewReportPage from "../pages/NewReportPage";
 
@@ -22,6 +23,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, loader: () => redirect("/kb") },
       { path: "kb", element: <KbListPage /> },
+      { path: "kb/:kbId/documents", element: <DocumentsPage /> },
       { path: "chat", element: <ChatPage /> },
       { path: "reports/new", element: <NewReportPage /> },
     ],
