@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/daniel/.claude/**)",
+      "Read(//Users/daniel/.claude/plans/**)",
+      "Bash(env)",
+      "Bash(corepack enable:*)",
+      "Bash(pnpm -v)",
+      "Bash(pnpm init:*)",
+      "Bash(npm init:*)",
+      "Bash(pnpm -C \"/Users/daniel/Desktop/LLM-projects/education-llm-project\" add -D -w typescript tsx eslint prettier concurrently dotenv-cli rimraf)",
+      "Bash(pnpm -C \"/Users/daniel/Desktop/LLM-projects/education-llm-project\" add -w zod)",
+      "Bash(pnpm-workspace.yaml:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm create:*)",
+      "Bash(pnpm add:*)",
+      "Bash(rmdir:*)",
+      "Bash(pnpm pkg:*)",
+      "Bash(infra/docker-compose.yml:*)",
+      "Bash(.env.example:*)",
+      "Bash(npx prisma:*)",
+      "Bash(pnpm approve-builds:*)",
+      "Bash(pnpm prisma:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker ps:*)",
+      "Bash(pnpm db:seed)",
+      "Bash(pnpm dev:*)",
+      "Bash(lsof -nP -iTCP:3001 -sTCP:LISTEN)",
+      "Bash(kill:*)",
+      "Bash(curl -s http://localhost:3001/api/v1/health/health)",
+      "Bash(curl -s -X POST http://localhost:3001/api/v1/auth/login -H 'content-type: application/json' -d '{\"\"username\"\":\"\"admin\"\",\"\"password\"\":\"\"admin123456\"\"}')",
+      "Bash(curl -s http://localhost:3001/api/v1/health)"
+    ]
+  }
+}

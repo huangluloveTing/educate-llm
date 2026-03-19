@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PARSING
+  EMBEDDING
+  READY
+  FAILED
+}
+
+enum ReportStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         Role
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  documents    Document[]
+  reports      ReportJob[]
+  auditLogs    AuditLog[] @relation("Actor")
+}
+
+model KnowledgeBase {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  documents   Document[]
+  reports     ReportJob[]
+}
+
+model Document {
+  id          String         @id @default(cuid())
+  kbId        String
+  kb          KnowledgeBase  @relation(fields: [kbId], references: [id], onDelete: Cascade)
+
+  filename    String
+  mime        String
+  storagePath String
+  hash        String?
+  status      DocumentStatus @default(UPLOADED)
+  error       String?
+
+  createdById String
+  createdBy   User           @relation(fields: [createdById], references: [id])
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ReportJob {
+  id            String       @id @default(cuid())
+  kbId          String
+  kb            KnowledgeBase @relation(fields: [kbId], references: [id])
+
+  createdById   String
+  createdBy     User         @relation(fields: [createdById], references: [id])
+
+  topic         String
+  status        ReportStatus @default(RUNNING)
+  outputPdfPath String?
+  error         String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sections      ReportSection[]
+}
+
+model ReportSection {
+  id       String   @id @default(cuid())
+  jobId    String
+  job      ReportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  title    String
+  order    Int
+  markdown String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([jobId, order])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation("Actor", fields: [actorId], references: [id])
+
+  action     String
+  targetType String
+  targetId   String?
+  metaJson   Json?
+
+  createdAt  DateTime @default(now())
+}

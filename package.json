@@ -1,0 +1,25 @@
+{
+  "name": "education-llm-project",
+  "private": true,
+  "packageManager": "pnpm@10.32.1",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n web,api -c cyan,green \"pnpm -C apps/web dev\" \"pnpm -C apps/api dev\"",
+    "build": "pnpm -C apps/web build && pnpm -C apps/api build",
+    "lint": "pnpm -r lint",
+    "format": "prettier -w .",
+    "docker:up": "docker compose -f infra/docker-compose.yml up -d",
+    "docker:down": "docker compose -f infra/docker-compose.yml down",
+    "db:migrate": "pnpm -C apps/api db:migrate",
+    "db:seed": "pnpm -C apps/api db:seed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "dotenv-cli": "^8.0.0",
+    "eslint": "^9.20.1",
+    "prettier": "^3.5.3",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.2"
+  }
+}
