@@ -2,8 +2,12 @@ import express from "express";
 
 import { prisma } from "../../db/prisma.js";
 import { requireAuth, requireRole } from "../../auth/middleware.js";
+import documents from "./documents.js";
 
 const router = express.Router();
+
+// Register document routes under kb
+router.use(documents);
 
 router.get("/kb", requireAuth, async (req, res) => {
   const items = await prisma.knowledgeBase.findMany({
