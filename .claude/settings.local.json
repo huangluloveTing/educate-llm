@@ -35,7 +35,21 @@
       "Bash(pnpm run:*)",
       "Bash(cd:*)",
       "Bash(grep -E 'lock$')",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(pnpm --filter api build)",
+      "Bash(pnpm --filter web build)",
+      "Bash(pnpm tsc:*)",
+      "Bash(ls:*)",
+      "Bash(pnpm docker:up)",
+      "Bash(psql postgresql://edu:edu@localhost:5432/edu_llm -c \"SELECT COUNT\\(*\\) FROM \"\"KnowledgeBase\"\";\")",
+      "Bash(pnpm typecheck:*)",
+      "Bash(node -e \"const pdfParse = require\\(''pdf-parse''\\); console.log\\(typeof pdfParse, Object.keys\\(pdfParse\\)\\)\")",
+      "Bash(pnpm remove:*)",
+      "Bash(pnpm view:*)",
+      "Bash(node -e \"const { PDFParse } = require\\(''pdf-parse''\\); console.log\\(''PDFParse:'', typeof PDFParse\\);\")",
+      "Bash(pnpm:*)",
+      "Bash(node:*)",
+      "Bash(git:*)"
     ]
   }
 }
