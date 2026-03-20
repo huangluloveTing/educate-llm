@@ -24,13 +24,15 @@ type ReportReqBody = {
   researchQuestions?: string;
 };
 
-// Fixed outline for MVP
+// Fixed outline for Chinese education research report
 const FIXED_OUTLINE = [
-  { order: 1, title: "Research Background and Significance" },
-  { order: 2, title: "Literature Review" },
-  { order: 3, title: "Research Methods" },
-  { order: 4, title: "Findings and Analysis" },
-  { order: 5, title: "Conclusions and Recommendations" },
+  { order: 1, title: "研究背景与意义" },
+  { order: 2, title: "文献综述" },
+  { order: 3, title: "研究方法" },
+  { order: 4, title: "研究过程与实施" },
+  { order: 5, title: "研究结果与分析" },
+  { order: 6, title: "研究结论与建议" },
+  { order: 7, title: "研究反思与展望" },
 ];
 
 router.post("/reports/stream", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
@@ -39,12 +41,12 @@ router.post("/reports/stream", requireAuth, requireRole(["ADMIN", "TEACHER"]), a
   try {
     const body = req.body as ReportReqBody;
     if (!body || typeof body.kbId !== "string" || typeof body.topic !== "string" || !body.topic.trim()) {
-      sseSend(res, { event: "error", data: { message: "Invalid parameters" } });
+      sseSend(res, { event: "error", data: { message: "参数无效" } });
       return res.end();
     }
 
     if (!env.LLM_API_KEY) {
-      sseSend(res, { event: "error", data: { message: "LLM_API_KEY not configured" } });
+      sseSend(res, { event: "error", data: { message: "LLM_API_KEY 未配置" } });
       return res.end();
     }
 
@@ -54,7 +56,7 @@ router.post("/reports/stream", requireAuth, requireRole(["ADMIN", "TEACHER"]), a
     });
 
     if (!kb) {
-      sseSend(res, { event: "error", data: { message: "Knowledge base not found" } });
+      sseSend(res, { event: "error", data: { message: "知识库不存在" } });
       return res.end();
     }
 
@@ -103,23 +105,24 @@ router.post("/reports/stream", requireAuth, requireRole(["ADMIN", "TEACHER"]), a
           .join("\n\n");
 
         // Generate section content
-        const systemPrompt = `You are an education research report writer. Generate a section for a research report.
+        const systemPrompt = `你是一位教育研究报告撰写专家。请为教育研究报告生成指定章节。
 
-Topic: ${body.topic}
-Section: ${outline.title}
-${body.gradeLevel ? `Grade Level: ${body.gradeLevel}` : ""}
-${body.subject ? `Subject: ${body.subject}` : ""}
+课题：${body.topic}
+章节：${outline.title}
+${body.gradeLevel ? `学段：${body.gradeLevel}` : ""}
+${body.subject ? `学科：${body.subject}` : ""}
 
-Use the following materials as reference. If materials are insufficient, use your general knowledge but note the limitation.
+请基于以下参考资料撰写内容。如果资料不足，可结合教育学常识，但需注明资料有限。
 
-Materials:
+参考资料：
 ${contextText}
 
-Generate the section content in markdown format. Include:
-- Clear structure with subsections if appropriate
-- Cite sources when using them: (Source 1), (Source 2)
-- Be scholarly and evidence-based
-- Aim for 300-500 words`;
+要求：
+- 使用 Markdown 格式生成章节内容
+- 结构清晰，必要时使用小标题
+- 引用资料时标注：(资料1)、(资料2)
+- 学术性、证据支撑
+- 字数控制在 300-500 字左右`;
 
         const messages = [
           new SystemMessage(systemPrompt),
@@ -193,7 +196,7 @@ Generate the section content in markdown format. Include:
     res.end();
   }
   catch (e) {
-    const msg = e instanceof Error ? e.message : "Report generation failed";
+    const msg = e instanceof Error ? e.message : "报告生成失败";
     sseSend(res, { event: "error", data: { message: msg } });
     res.end();
   }

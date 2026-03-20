@@ -30,7 +30,7 @@ export default function NewReportPage() {
       setKbs(data);
     }
     catch (e) {
-      message.error(e instanceof Error ? e.message : "Failed to load knowledge bases");
+      message.error(e instanceof Error ? e.message : "加载知识库失败");
     }
   }
 
@@ -41,25 +41,26 @@ export default function NewReportPage() {
     setReportId(null);
     setGenerating(true);
 
-    const totalSections = 5; // Fixed outline has 5 sections
+    const totalSections = 7; // Fixed outline has 7 sections
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/reports/stream`, {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/reports/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(values),
       });
 
       if (!response.ok) {
-        throw new Error("Report generation request failed");
+        throw new Error("报告生成请求失败");
       }
 
       const reader = response.body?.getReader();
       if (!reader) {
-        throw new Error("No response body");
+        throw new Error("无响应内容");
       }
 
       const decoder = new TextDecoder();
@@ -73,10 +74,11 @@ export default function NewReportPage() {
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        for (const line of lines) {
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
           if (line.startsWith("event:")) {
             const event = line.slice(6).trim();
-            const nextLine = lines.shift();
+            const nextLine = lines[i + 1];
             if (nextLine && nextLine.startsWith("data:")) {
               const data = JSON.parse(nextLine.slice(5).trim());
 
@@ -91,20 +93,21 @@ export default function NewReportPage() {
                 setProgress(100);
                 setDownloadUrl(data.downloadUrl);
                 setReportId(data.reportId);
-                message.success("Report generated successfully!");
+                message.success("报告生成成功！");
                 setGenerating(false);
               }
               else if (event === "error") {
-                message.error(data.message || "Report generation error");
+                message.error(data.message || "报告生成出错");
                 setGenerating(false);
               }
+              i++; // Skip the data line
             }
           }
         }
       }
     }
     catch (e) {
-      message.error(e instanceof Error ? e.message : "Report generation failed");
+      message.error(e instanceof Error ? e.message : "报告生成失败");
       setGenerating(false);
     }
   }
@@ -113,16 +116,16 @@ export default function NewReportPage() {
     <div style={{ maxWidth: 1200 }}>
       <Card>
         <Typography.Title level={3} style={{ marginTop: 0 }}>
-          Generate Research Report
+          生成研究报告
         </Typography.Title>
 
         <Form layout="vertical" onFinish={generateReport}>
           <Form.Item
-            label="Knowledge Base"
+            label="知识库"
             name="kbId"
-            rules={[{ required: true, message: "Please select a knowledge base" }]}
+            rules={[{ required: true, message: "请选择知识库" }]}
           >
-            <Select placeholder="Select a knowledge base">
+            <Select placeholder="选择知识库">
               {kbs.map((kb) => (
                 <Select.Option key={kb.id} value={kb.id}>
                   {kb.name}
@@ -132,32 +135,32 @@ export default function NewReportPage() {
           </Form.Item>
 
           <Form.Item
-            label="Research Topic"
+            label="研究课题"
             name="topic"
-            rules={[{ required: true, message: "Please enter a research topic" }]}
+            rules={[{ required: true, message: "请输入研究课题" }]}
           >
-            <Input placeholder="e.g., Project-Based Learning in STEM Education" />
+            <Input placeholder="例如：STEM 教育中的项目式学习" />
           </Form.Item>
 
-          <Form.Item label="Grade Level (Optional)" name="gradeLevel">
-            <Input placeholder="e.g., High School, Middle School" />
+          <Form.Item label="学段（可选）" name="gradeLevel">
+            <Input placeholder="例如：高中、初中" />
           </Form.Item>
 
-          <Form.Item label="Subject (Optional)" name="subject">
-            <Input placeholder="e.g., Mathematics, Science" />
+          <Form.Item label="学科（可选）" name="subject">
+            <Input placeholder="例如：数学、科学" />
           </Form.Item>
 
-          <Form.Item label="Research Duration (Optional)" name="researchDuration">
-            <Input placeholder="e.g., 6 months, 1 year" />
+          <Form.Item label="研究周期（可选）" name="researchDuration">
+            <Input placeholder="例如：6 个月、1 年" />
           </Form.Item>
 
-          <Form.Item label="Research Questions (Optional)" name="researchQuestions">
-            <Input.TextArea rows={3} placeholder="Enter specific research questions to address..." />
+          <Form.Item label="研究问题（可选）" name="researchQuestions">
+            <Input.TextArea rows={3} placeholder="输入具体的研究问题..." />
           </Form.Item>
 
           <Form.Item>
             <Button type="primary" htmlType="submit" loading={generating} disabled={generating} block>
-              Generate Report
+              生成报告
             </Button>
           </Form.Item>
         </Form>
@@ -165,7 +168,7 @@ export default function NewReportPage() {
         {generating && (
           <Space direction="vertical" style={{ width: "100%", marginTop: 24 }} size="large">
             <div>
-              <Typography.Text strong>Generating sections...</Typography.Text>
+              <Typography.Text strong>正在生成章节...</Typography.Text>
               <Progress percent={progress} status="active" />
             </div>
           </Space>
@@ -173,7 +176,7 @@ export default function NewReportPage() {
 
         {sections.length > 0 && (
           <div style={{ marginTop: 24 }}>
-            <Typography.Title level={4}>Generated Sections</Typography.Title>
+            <Typography.Title level={4}>已生成章节</Typography.Title>
             {sections
               .sort((a, b) => a.order - b.order)
               .map((section) => (
@@ -195,10 +198,10 @@ export default function NewReportPage() {
               type="primary"
               size="large"
               onClick={() => {
-                window.open(`${import.meta.env.VITE_API_URL}${downloadUrl}`, "_blank");
+                window.open(`${import.meta.env.VITE_API_BASE_URL}${downloadUrl}`, "_blank");
               }}
             >
-              Download PDF Report
+              下载 PDF 报告
             </Button>
           </div>
         )}

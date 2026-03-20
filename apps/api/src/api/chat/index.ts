@@ -26,18 +26,18 @@ router.post("/chat/stream", requireAuth, async (req, res) => {
   try {
     const body = req.body as ChatReqBody;
     if (!body || typeof body.kbId !== "string" || !Array.isArray(body.messages)) {
-      sseSend(res, { event: "error", data: { message: "Invalid parameters" } });
+      sseSend(res, { event: "error", data: { message: "参数无效" } });
       return res.end();
     }
 
     if (!env.LLM_API_KEY) {
-      sseSend(res, { event: "error", data: { message: "LLM_API_KEY not configured" } });
+      sseSend(res, { event: "error", data: { message: "LLM_API_KEY 未配置" } });
       return res.end();
     }
 
     const lastUser = [...body.messages].reverse().find(m => m.role === "user");
     if (!lastUser || !lastUser.content?.trim()) {
-      sseSend(res, { event: "error", data: { message: "User message is required" } });
+      sseSend(res, { event: "error", data: { message: "用户消息不能为空" } });
       return res.end();
     }
 
@@ -78,10 +78,10 @@ router.post("/chat/stream", requireAuth, async (req, res) => {
       .join("\n\n");
 
     const system = new SystemMessage(
-      `You are an education research assistant. Answer questions strictly based on the provided materials.\n` +
-      `- If the materials are insufficient to support a conclusion, clearly state "uncertain/insufficient materials".\n` +
-      `- In your answer, cite sources in the format: (Source 1), (Source 2).\n\n` +
-      `Materials:\n${contextText}`,
+      `你是一位教育研究助手。请严格基于提供的参考资料回答问题。\n` +
+      `- 如果资料不足以支持结论，请明确说明"不确定/资料不足"。\n` +
+      `- 在回答中引用资料来源，格式为：(资料1)、(资料2)。\n\n` +
+      `参考资料：\n${contextText}`,
     );
 
     const chatMessages: (SystemMessage | HumanMessage | AIMessage)[] = [system];
@@ -103,7 +103,7 @@ router.post("/chat/stream", requireAuth, async (req, res) => {
     res.end();
   }
   catch (e) {
-    const msg = e instanceof Error ? e.message : "Chat failed";
+    const msg = e instanceof Error ? e.message : "聊天失败";
     sseSend(res, { event: "error", data: { message: msg } });
     res.end();
   }

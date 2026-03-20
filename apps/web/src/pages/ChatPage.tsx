@@ -40,7 +40,7 @@ export default function ChatPage() {
       }
     }
     catch (e) {
-      message.error(e instanceof Error ? e.message : "Failed to load knowledge bases");
+      message.error(e instanceof Error ? e.message : "加载知识库失败");
     }
   }
 
@@ -57,11 +57,12 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, assistantMessage]);
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/chat/stream`, {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/chat/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           kbId: selectedKb,
@@ -71,12 +72,12 @@ export default function ChatPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Chat request failed");
+        throw new Error("聊天请求失败");
       }
 
       const reader = response.body?.getReader();
       if (!reader) {
-        throw new Error("No response body");
+        throw new Error("无响应内容");
       }
 
       const decoder = new TextDecoder();
@@ -90,10 +91,11 @@ export default function ChatPage() {
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        for (const line of lines) {
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
           if (line.startsWith("event:")) {
             const event = line.slice(6).trim();
-            const nextLine = lines.shift();
+            const nextLine = lines[i + 1];
             if (nextLine && nextLine.startsWith("data:")) {
               const data = JSON.parse(nextLine.slice(5).trim());
 
@@ -114,16 +116,17 @@ export default function ChatPage() {
                 setLoading(false);
               }
               else if (event === "error") {
-                message.error(data.message || "Chat error");
+                message.error(data.message || "聊天出错");
                 setLoading(false);
               }
+              i++; // Skip the data line
             }
           }
         }
       }
     }
     catch (e) {
-      message.error(e instanceof Error ? e.message : "Chat failed");
+      message.error(e instanceof Error ? e.message : "聊天失败");
       // Remove incomplete assistant message
       setMessages((prev) => prev.filter((m) => m.content.length > 0 || m.role !== "assistant"));
     }
@@ -136,17 +139,17 @@ export default function ChatPage() {
     <div style={{ maxWidth: 1200 }}>
       <Card>
         <Typography.Title level={3} style={{ marginTop: 0 }}>
-          RAG Chat
+          RAG 聊天
         </Typography.Title>
 
         <Space direction="vertical" style={{ width: "100%" }} size="large">
           <div>
-            <Typography.Text strong>Select Knowledge Base:</Typography.Text>
+            <Typography.Text strong>选择知识库：</Typography.Text>
             <Select
               value={selectedKb}
               onChange={setSelectedKb}
               style={{ width: "100%", marginTop: 8 }}
-              placeholder="Select a knowledge base"
+              placeholder="选择知识库"
             >
               {kbs.map((kb) => (
                 <Select.Option key={kb.id} value={kb.id}>
@@ -166,7 +169,7 @@ export default function ChatPage() {
             }}
           >
             {messages.length === 0 && (
-              <Typography.Text type="secondary">Start a conversation...</Typography.Text>
+              <Typography.Text type="secondary">开始对话...</Typography.Text>
             )}
             {messages.map((msg, i) => (
               <div
@@ -178,7 +181,7 @@ export default function ChatPage() {
                   borderRadius: 4,
                 }}
               >
-                <Typography.Text strong>{msg.role === "user" ? "You" : "Assistant"}:</Typography.Text>
+                <Typography.Text strong>{msg.role === "user" ? "你" : "助手"}:</Typography.Text>
                 <div style={{ marginTop: 4 }}>
                   <ReactMarkdown>{msg.content}</ReactMarkdown>
                 </div>
@@ -192,11 +195,11 @@ export default function ChatPage() {
           </div>
 
           {sources.length > 0 && (
-            <Card size="small" title="Sources">
+            <Card size="small" title="参考资料">
               {sources.map((src, i) => (
                 <div key={i} style={{ marginBottom: 8 }}>
                   <Typography.Text strong>
-                    Source {i + 1}: {src.filename} (chunk {src.chunkIndex}, score: {src.score.toFixed(3)})
+                    资料 {i + 1}: {src.filename} (chunk {src.chunkIndex}, 相似度: {src.score.toFixed(3)})
                   </Typography.Text>
                   <Typography.Paragraph
                     type="secondary"
@@ -212,14 +215,14 @@ export default function ChatPage() {
 
           <Space.Compact style={{ width: "100%" }}>
             <Input
-              placeholder="Type your message..."
+              placeholder="输入你的问题..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onPressEnter={sendMessage}
               disabled={!selectedKb || loading}
             />
             <Button type="primary" onClick={sendMessage} disabled={!selectedKb || loading || !input.trim()}>
-              Send
+              发送
             </Button>
           </Space.Compact>
         </Space>
