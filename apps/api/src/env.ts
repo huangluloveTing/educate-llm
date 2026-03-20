@@ -20,6 +20,7 @@ const envSchema = z.object({
   QDRANT_API_KEY: z.string().optional(),
 
   STORAGE_DIR: z.string().min(1).default("../../storage"),
+  PDF_FONT_PATH: z.string().optional(),
 });
 
 try {

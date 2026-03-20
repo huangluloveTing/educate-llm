@@ -9,7 +9,6 @@ import { prisma } from "../../db/prisma.js";
 import { env } from "../../env.js";
 import { embedQuery } from "../../services/embeddings.js";
 import { ingestDocument } from "../../services/ingestion.js";
-import { getMimeType } from "../../services/parser.js";
 import { deleteDocumentPoints, searchKnowledgeBase } from "../../services/qdrant.js";
 
 const router = express.Router();
@@ -28,11 +27,11 @@ router.post(
   upload.single("file"),
   async (req, res) => {
     try {
-      const { kbId } = req.params;
+      const kbId = Array.isArray(req.params.kbId) ? req.params.kbId[0] : req.params.kbId;
       const file = req.file;
 
       if (!file) {
-        return res.status(400).json({ message: "未提供文件" });
+        return res.status(400).json({ message: "No file uploaded" });
       }
 
       const kb = await prisma.knowledgeBase.findUnique({
@@ -40,15 +39,11 @@ router.post(
       });
 
       if (!kb) {
-        return res.status(404).json({ message: "知识库不存在" });
+        return res.status(404).json({ message: "Knowledge base not found" });
       }
 
       const filename = file.originalname;
-      const mime = getMimeType(filename);
-
-      if (mime === "application/octet-stream") {
-        return res.status(400).json({ message: "不支持的文件格式" });
-      }
+      const mime = file.mimetype;
 
       const document = await prisma.document.create({
         data: {
@@ -88,7 +83,7 @@ router.post(
     }
     catch (error) {
       console.error("Upload error:", error);
-      return res.status(500).json({ message: "上传失败" });
+      return res.status(500).json({ message: "Upload failed" });
     }
   },
 );
@@ -98,14 +93,14 @@ router.get(
   requireAuth,
   async (req, res) => {
     try {
-      const { kbId } = req.params;
+      const kbId = Array.isArray(req.params.kbId) ? req.params.kbId[0] : req.params.kbId;
 
       const kb = await prisma.knowledgeBase.findUnique({
         where: { id: kbId },
       });
 
       if (!kb) {
-        return res.status(404).json({ message: "知识库不存在" });
+        return res.status(404).json({ message: "Knowledge base not found" });
       }
 
       const documents = await prisma.document.findMany({
@@ -130,7 +125,7 @@ router.get(
     }
     catch (error) {
       console.error("List documents error:", error);
-      return res.status(500).json({ message: "获取文档列表失败" });
+      return res.status(500).json({ message: "Failed to fetch documents" });
     }
   },
 );
@@ -140,7 +135,7 @@ router.get(
   requireAuth,
   async (req, res) => {
     try {
-      const { id } = req.params;
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
       const document = await prisma.document.findUnique({
         where: { id },
@@ -160,14 +155,14 @@ router.get(
       });
 
       if (!document) {
-        return res.status(404).json({ message: "文档不存在" });
+        return res.status(404).json({ message: "Document not found" });
       }
 
       return res.json(document);
     }
     catch (error) {
       console.error("Get document error:", error);
-      return res.status(500).json({ message: "获取文档详情失败" });
+      return res.status(500).json({ message: "Failed to fetch document" });
     }
   },
 );
@@ -178,14 +173,14 @@ router.delete(
   requireRole(["ADMIN", "TEACHER"]),
   async (req, res) => {
     try {
-      const { id } = req.params;
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
       const document = await prisma.document.findUnique({
         where: { id },
       });
 
       if (!document) {
-        return res.status(404).json({ message: "文档不存在" });
+        return res.status(404).json({ message: "Document not found" });
       }
 
       await deleteDocumentPoints(document.kbId, document.id);
@@ -202,11 +197,11 @@ router.delete(
         console.error("Failed to delete storage directory:", error);
       }
 
-      return res.json({ message: "删除成功" });
+      return res.json({ message: "Document deleted successfully" });
     }
     catch (error) {
       console.error("Delete document error:", error);
-      return res.status(500).json({ message: "删除文档失败" });
+      return res.status(500).json({ message: "Failed to delete document" });
     }
   },
 );
@@ -216,11 +211,11 @@ router.post(
   requireAuth,
   async (req, res) => {
     try {
-      const { kbId } = req.params;
+      const kbId = Array.isArray(req.params.kbId) ? req.params.kbId[0] : req.params.kbId;
       const { query, topK = 5 } = req.body ?? {};
 
       if (typeof query !== "string" || query.trim().length === 0) {
-        return res.status(400).json({ message: "搜索关键词不能为空" });
+        return res.status(400).json({ message: "Query is required" });
       }
 
       const kb = await prisma.knowledgeBase.findUnique({
@@ -228,7 +223,7 @@ router.post(
       });
 
       if (!kb) {
-        return res.status(404).json({ message: "知识库不存在" });
+        return res.status(404).json({ message: "Knowledge base not found" });
       }
 
       const queryVector = await embedQuery(query.trim());
@@ -243,7 +238,7 @@ router.post(
     }
     catch (error) {
       console.error("Search error:", error);
-      const message = error instanceof Error ? error.message : "搜索失败";
+      const message = error instanceof Error ? error.message : "Search failed";
       return res.status(500).json({ message });
     }
   },

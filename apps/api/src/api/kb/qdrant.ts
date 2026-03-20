@@ -1,11 +1,10 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 
-export function createQdrantClient(): QdrantClient {
-  // Get the Qdrant configuration from environment variables
-  const url = process.env.QDRANT_URL || "http://localhost:6333";
+import { env } from "../../env.js";
 
-  // Initialize Qdrant client
+export function createQdrantClient(): QdrantClient {
   return new QdrantClient({
-    url: url,
+    url: env.QDRANT_URL,
+    apiKey: env.QDRANT_API_KEY || undefined,
   });
 }

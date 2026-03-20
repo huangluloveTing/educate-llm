@@ -31,7 +31,11 @@
       "Bash(curl -s -X POST http://localhost:3001/api/v1/auth/login -H 'content-type: application/json' -d '{\"\"username\"\":\"\"admin\"\",\"\"password\"\":\"\"admin123456\"\"}')",
       "Bash(curl -s http://localhost:3001/api/v1/health)",
       "Bash(npm install:*)",
-      "Bash(npm list:*)"
+      "Bash(npm list:*)",
+      "Bash(pnpm run:*)",
+      "Bash(cd:*)",
+      "Bash(grep -E 'lock$')",
+      "Bash(npx tsc:*)"
     ]
   }
 }

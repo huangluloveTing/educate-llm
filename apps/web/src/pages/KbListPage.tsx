@@ -10,7 +10,6 @@ export default function KbListPage() {
   const [items, setItems] = useState<Kb[]>([]);
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const navigate = useNavigate();
 
   async function refresh() {
     const data = await apiFetch<Kb[]>("/kb");

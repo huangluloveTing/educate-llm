@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 import * as cheerio from "cheerio";
 
@@ -23,6 +22,9 @@ export async function parseDocument(filePath: string, mime: string): Promise<str
 }
 
 async function parsePDF(filePath: string): Promise<string> {
+  // pdf-parse is CJS, need to handle properly
+  const pdfParseModule = await import("pdf-parse");
+  const pdfParse = (pdfParseModule as any).default || pdfParseModule;
   const buffer = await fs.readFile(filePath);
   const data = await pdfParse(buffer);
   return data.text;
