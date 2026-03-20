@@ -1,4 +1,5 @@
 import { OpenAIEmbeddings } from "@langchain/openai";
+
 import { env } from "../env.js";
 
 let embeddings: OpenAIEmbeddings | null = null;

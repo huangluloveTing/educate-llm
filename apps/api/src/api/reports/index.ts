@@ -1,17 +1,17 @@
+import { streamText } from "ai";
 import express from "express";
-import path from "path";
-import fs from "fs/promises";
-import PDFDocument from "pdfkit";
 import { marked } from "marked";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { createReadStream, createWriteStream } from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
+import PDFDocument from "pdfkit";
 
 import { requireAuth, requireRole } from "../../auth/middleware.js";
 import { prisma } from "../../db/prisma.js";
 import { env } from "../../env.js";
-import { sseInit, sseSend } from "../../utils/sse.js";
-import { createChatModel } from "../../llm/chatModel.js";
+import { createAiSdkModel } from "../../llm/ai-sdk-model.js";
 import { embedQuery } from "../../services/embeddings.js";
-import { getQdrantClient, getCollectionName } from "../../services/qdrant.js";
+import { getCollectionName, getQdrantClient } from "../../services/qdrant.js";
 
 const router = express.Router();
 
@@ -36,17 +36,22 @@ const FIXED_OUTLINE = [
 ];
 
 router.post("/reports/stream", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
-  sseInit(res);
+  // 设置 SSE 头
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.write(":ok\n\n");
 
   try {
     const body = req.body as ReportReqBody;
     if (!body || typeof body.kbId !== "string" || typeof body.topic !== "string" || !body.topic.trim()) {
-      sseSend(res, { event: "error", data: { message: "参数无效" } });
+      res.write(`event: error\ndata: ${JSON.stringify({ message: "参数无效" })}\n\n`);
       return res.end();
     }
 
     if (!env.LLM_API_KEY) {
-      sseSend(res, { event: "error", data: { message: "LLM_API_KEY 未配置" } });
+      res.write(`event: error\ndata: ${JSON.stringify({ message: "LLM_API_KEY 未配置" })}\n\n`);
       return res.end();
     }
 
@@ -56,7 +61,7 @@ router.post("/reports/stream", requireAuth, requireRole(["ADMIN", "TEACHER"]), a
     });
 
     if (!kb) {
-      sseSend(res, { event: "error", data: { message: "知识库不存在" } });
+      res.write(`event: error\ndata: ${JSON.stringify({ message: "知识库不存在" })}\n\n`);
       return res.end();
     }
 
@@ -72,7 +77,7 @@ router.post("/reports/stream", requireAuth, requireRole(["ADMIN", "TEACHER"]), a
 
     const qdrant = getQdrantClient();
     const collectionName = getCollectionName(body.kbId);
-    const llm = createChatModel();
+    const model = createAiSdkModel();
 
     const allSections: Array<{ title: string; order: number; markdown: string }> = [];
 
@@ -100,7 +105,7 @@ router.post("/reports/stream", requireAuth, requireRole(["ADMIN", "TEACHER"]), a
           .map((h, i) => {
             const text = (h.payload as any)?.text as string;
             const filename = (h.payload as any)?.filename as string;
-            return `[Source ${i + 1}] ${filename}\n${text}`;
+            return `[资料${i + 1}] ${filename}\n${text}`;
           })
           .join("\n\n");
 
@@ -125,16 +130,19 @@ ${contextText}
 - 字数控制在 300-500 字左右`;
 
         const messages = [
-          new SystemMessage(systemPrompt),
-          new HumanMessage(`Generate the section: ${outline.title}`),
+          { role: "system" as const, content: systemPrompt },
+          { role: "user" as const, content: `请撰写章节：${outline.title}` },
         ];
 
+        const result = streamText({
+          model,
+          messages,
+          temperature: 0.2,
+        });
+
         let sectionMarkdown = "";
-        for await (const chunk of await llm.stream(messages)) {
-          const content = (chunk as any)?.content;
-          if (typeof content === "string" && content.length > 0) {
-            sectionMarkdown += content;
-          }
+        for await (const chunk of result.textStream) {
+          sectionMarkdown += chunk;
         }
 
         // Save section to database
@@ -154,14 +162,12 @@ ${contextText}
         });
 
         // Send section to client
-        sseSend(res, {
-          event: "section",
-          data: {
-            title: outline.title,
-            order: outline.order,
-            markdown: sectionMarkdown,
-          },
+        const sectionJson = JSON.stringify({
+          title: outline.title,
+          order: outline.order,
+          markdown: sectionMarkdown,
         });
+        res.write(`event: section\ndata: ${sectionJson}\n\n`);
       }
       catch (error) {
         console.error(`Failed to generate section ${outline.title}:`, error);
@@ -186,18 +192,16 @@ ${contextText}
     });
 
     // Send completion
-    sseSend(res, {
-      event: "done",
-      data: {
-        reportId: job.id,
-        downloadUrl: `/api/v1/reports/${job.id}/download`,
-      },
+    const doneJson = JSON.stringify({
+      reportId: job.id,
+      downloadUrl: `/api/v1/reports/${job.id}/download`,
     });
+    res.write(`event: done\ndata: ${doneJson}\n\n`);
     res.end();
   }
   catch (e) {
     const msg = e instanceof Error ? e.message : "报告生成失败";
-    sseSend(res, { event: "error", data: { message: msg } });
+    res.write(`event: error\ndata: ${JSON.stringify({ message: msg })}\n\n`);
     res.end();
   }
 });
@@ -210,7 +214,7 @@ async function generatePDF(
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ margin: 50 });
-      const stream = require("fs").createWriteStream(outputPath);
+      const stream = createWriteStream(outputPath);
 
       doc.pipe(stream);
 
@@ -246,7 +250,7 @@ async function generatePDF(
           .replace(/&amp;/g, "&")
           .replace(/&lt;/g, "<")
           .replace(/&gt;/g, ">")
-          .replace(/&quot;/g, '"')
+          .replace(/&quot;/g, "\"")
           .replace(/&#39;/g, "'")
           .replace(/\s+/g, " ") // Normalize whitespace
           .trim();
@@ -338,7 +342,7 @@ router.get("/reports/:id/download", requireAuth, async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(report.topic)}.pdf"`);
 
     // Stream file
-    const fileStream = require("fs").createReadStream(report.outputPdfPath);
+    const fileStream = createReadStream(report.outputPdfPath);
     fileStream.pipe(res);
   }
   catch (error) {

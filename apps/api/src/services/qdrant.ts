@@ -1,4 +1,5 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
+
 import { env } from "../env.js";
 
 let client: QdrantClient | null = null;
@@ -39,6 +40,17 @@ export async function deleteDocumentPoints(kbId: string, documentId: string): Pr
   const collectionName = getCollectionName(kbId);
 
   try {
+    // Check if collection exists first
+    try {
+      await client.getCollection(collectionName);
+    }
+    catch {
+      // Collection doesn't exist, nothing to delete
+      console.warn(`Collection ${collectionName} doesn't exist, skipping point deletion`);
+      return;
+    }
+
+    // Collection exists, delete the document points
     await client.delete(collectionName, {
       filter: {
         must: [
@@ -55,13 +67,13 @@ export async function deleteDocumentPoints(kbId: string, documentId: string): Pr
   }
 }
 
-export interface SearchResult {
+export type SearchResult = {
   score: number;
   text: string;
   filename: string;
   documentId: string;
   chunkIndex: number;
-}
+};
 
 export async function searchKnowledgeBase(
   kbId: string,

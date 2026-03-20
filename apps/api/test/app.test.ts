@@ -19,6 +19,6 @@ describe("GET /", () => {
       .set("Accept", "application/json")
       .expect("Content-Type", /json/)
       .expect(200, {
-        message: "🦄🌈✨👋🌎🌍🌏✨🌈🦄",
+        message: "edu-llm API",
       }));
 });

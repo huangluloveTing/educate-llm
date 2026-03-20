@@ -1,9 +1,9 @@
 import bcrypt from "bcryptjs";
 import express from "express";
 
-import { prisma } from "../../db/prisma.js";
 import { signAccessToken } from "../../auth/jwt.js";
 import { requireAuth } from "../../auth/middleware.js";
+import { prisma } from "../../db/prisma.js";
 
 const router = express.Router();
 

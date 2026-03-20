@@ -8,7 +8,7 @@ export type AuthUser = {
 };
 
 declare global {
-  // eslint-disable-next-line ts/consistent-type-definitions
+  // eslint-disable-next-line ts/no-namespace
   namespace Express {
     // eslint-disable-next-line ts/consistent-type-definitions
     interface Request {

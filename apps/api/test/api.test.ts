@@ -3,22 +3,13 @@ import { describe, it } from "vitest";
 
 import app from "../src/app.js";
 
-describe("GET /api/v1", () => {
-  it("responds with a json message", () =>
+describe("GET /api/v1/health", () => {
+  it("responds with ok=true", () =>
     request(app)
-      .get("/api/v1")
+      .get("/api/v1/health")
       .set("Accept", "application/json")
       .expect("Content-Type", /json/)
       .expect(200, {
-        message: "API - 👋🌎🌍🌏",
+        ok: true,
       }));
-});
-
-describe("GET /api/v1/emojis", () => {
-  it("responds with a json message", () =>
-    request(app)
-      .get("/api/v1/emojis")
-      .set("Accept", "application/json")
-      .expect("Content-Type", /json/)
-      .expect(200, ["😀", "😳", "🙄"]));
 });

@@ -1,19 +1,18 @@
 import { OpenAIEmbeddings } from "@langchain/openai";
 
-export async function createEmbeddings(): Promise<OpenAIEmbeddings> {
-  // Get the embedding API configuration from environment variables
-  const apiKey = process.env.EMBED_API_KEY || process.env.LLM_API_KEY || "";
-  const baseUrl = process.env.EMBED_BASE_URL || process.env.LLM_BASE_URL;
+import { env } from "../../env.js";
 
-  const embeddingsConfig: any = {
-    apiKey,
-  };
-
-  // If we have a custom base URL, use it (for OpenAI-compatible APIs)
-  if (baseUrl) {
-    embeddingsConfig.baseUrl = baseUrl;
+export function createEmbeddings(): OpenAIEmbeddings {
+  const apiKey = env.EMBED_API_KEY || env.LLM_API_KEY;
+  if (!apiKey) {
+    throw new Error("Embedding API key not configured");
   }
 
-  // Create and return the embeddings instance
-  return new OpenAIEmbeddings(embeddingsConfig);
+  return new OpenAIEmbeddings({
+    openAIApiKey: apiKey,
+    configuration: {
+      baseURL: env.EMBED_BASE_URL || env.LLM_BASE_URL,
+    },
+    model: env.EMBED_MODEL,
+  });
 }

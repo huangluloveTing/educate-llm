@@ -1,7 +1,8 @@
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+
 import { prisma } from "../db/prisma.js";
-import { parseDocument } from "./parser.js";
 import { embedTexts } from "./embeddings.js";
+import { parseDocument } from "./parser.js";
 import { ensureCollection, getCollectionName, getQdrantClient } from "./qdrant.js";
 
 const textSplitter = new RecursiveCharacterTextSplitter({
@@ -9,10 +10,10 @@ const textSplitter = new RecursiveCharacterTextSplitter({
   chunkOverlap: 150,
 });
 
-export interface Chunk {
+export type Chunk = {
   text: string;
   chunkIndex: number;
-}
+};
 
 export async function ingestDocument(documentId: string): Promise<void> {
   try {
