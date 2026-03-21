@@ -12,5 +12,7 @@ export function createAiSdkModel() {
     baseURL: env.LLM_BASE_URL,
   });
 
-  return openai(env.LLM_MODEL);
+  // Use chat() for Chat Completions API (/v1/chat/completions)
+  // instead of responses() API (/v1/responses)
+  return openai.chat(env.LLM_MODEL);
 }
