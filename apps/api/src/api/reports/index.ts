@@ -1,4 +1,4 @@
-import { streamText } from "ai";
+import { streamText, stepCountIs } from "ai";
 import express from "express";
 import { marked } from "marked";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -10,8 +10,7 @@ import { requireAuth, requireRole } from "../../auth/middleware.js";
 import { prisma } from "../../db/prisma.js";
 import { env } from "../../env.js";
 import { createAiSdkModel } from "../../llm/ai-sdk-model.js";
-import { embedQuery } from "../../services/embeddings.js";
-import { getCollectionName, getQdrantClient } from "../../services/qdrant.js";
+import { createRagTools } from "../../llm/rag-tools.js";
 
 const router = express.Router();
 
@@ -34,6 +33,34 @@ const FIXED_OUTLINE = [
   { order: 6, title: "研究结论与建议" },
   { order: 7, title: "研究反思与展望" },
 ];
+
+/**
+ * System prompt for report section generation with tool calling.
+ */
+function createSectionSystemPrompt(
+  topic: string,
+  sectionTitle: string,
+  gradeLevel?: string,
+  subject?: string,
+): string {
+  return `你是一位教育研究报告撰写专家。请为教育研究报告生成指定章节。
+
+课题：${topic}
+章节：${sectionTitle}
+${gradeLevel ? `学段：${gradeLevel}` : ""}
+${subject ? `学科：${subject}` : ""}
+
+你可以使用 kbSearch 工具搜索知识库获取相关资料。
+
+重要规则：
+1. 撰写前先使用 kbSearch 工具搜索与章节相关的资料
+2. 如果工具返回了资料，在内容中引用来源，格式为：(资料1)、(资料2) 等
+3. 如果工具返回的 sources 为空或资料不足，你可以基于教育学常识撰写，但需注明"资料有限"
+4. 使用 Markdown 格式生成章节内容
+5. 结构清晰，必要时使用小标题
+6. 学术性、证据支撑
+7. 字数控制在 300-500 字左右`;
+}
 
 router.post("/reports/stream", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
   // 设置 SSE 头
@@ -75,59 +102,24 @@ router.post("/reports/stream", requireAuth, requireRole(["ADMIN", "TEACHER"]), a
       },
     });
 
-    const qdrant = getQdrantClient();
-    const collectionName = getCollectionName(body.kbId);
     const model = createAiSdkModel();
-
     const allSections: Array<{ title: string; order: number; markdown: string }> = [];
 
-    // Generate each section
+    // Generate each section with tool-based retrieval
     for (const outline of FIXED_OUTLINE) {
       try {
-        // Retrieve context for this section
-        const sectionQuery = `${body.topic} ${outline.title}`;
-        const queryVector = await embedQuery(sectionQuery);
-
-        const hits = await qdrant.search(collectionName, {
-          vector: queryVector,
-          limit: 5,
-          with_payload: true,
-          with_vector: false,
-          filter: {
-            must: [{
-              key: "kbId",
-              match: { value: body.kbId },
-            }],
-          },
+        // Create tools for this section
+        const tools = createRagTools({
+          kbId: body.kbId,
+          defaultTopK: 5,
         });
 
-        const contextText = hits
-          .map((h, i) => {
-            const text = (h.payload as any)?.text as string;
-            const filename = (h.payload as any)?.filename as string;
-            return `[资料${i + 1}] ${filename}\n${text}`;
-          })
-          .join("\n\n");
-
-        // Generate section content
-        const systemPrompt = `你是一位教育研究报告撰写专家。请为教育研究报告生成指定章节。
-
-课题：${body.topic}
-章节：${outline.title}
-${body.gradeLevel ? `学段：${body.gradeLevel}` : ""}
-${body.subject ? `学科：${body.subject}` : ""}
-
-请基于以下参考资料撰写内容。如果资料不足，可结合教育学常识，但需注明资料有限。
-
-参考资料：
-${contextText}
-
-要求：
-- 使用 Markdown 格式生成章节内容
-- 结构清晰，必要时使用小标题
-- 引用资料时标注：(资料1)、(资料2)
-- 学术性、证据支撑
-- 字数控制在 300-500 字左右`;
+        const systemPrompt = createSectionSystemPrompt(
+          body.topic,
+          outline.title,
+          body.gradeLevel,
+          body.subject,
+        );
 
         const messages = [
           { role: "system" as const, content: systemPrompt },
@@ -137,12 +129,68 @@ ${contextText}
         const result = streamText({
           model,
           messages,
+          tools,
+          toolChoice: "auto",
+          stopWhen: stepCountIs(3), // Allow search then write
           temperature: 0.2,
         });
 
         let sectionMarkdown = "";
-        for await (const chunk of result.textStream) {
-          sectionMarkdown += chunk;
+
+        // Process fullStream for this section
+        for await (const part of result.fullStream) {
+          switch (part.type) {
+            case "text-delta": {
+              sectionMarkdown += part.text;
+              break;
+            }
+
+            case "tool-call": {
+              // Send tool call event with section info
+              res.write(`event: tool_call\ndata: ${JSON.stringify({
+                toolName: part.toolName,
+                toolCallId: part.toolCallId,
+                args: part.input,
+                sectionTitle: outline.title,
+                sectionOrder: outline.order,
+              })}\n\n`);
+              break;
+            }
+
+            case "tool-result": {
+              // Send tool result event with section info
+              const output = part.output as { sources?: unknown[]; error?: string } | undefined;
+              res.write(`event: tool_result\ndata: ${JSON.stringify({
+                toolName: part.toolName,
+                toolCallId: part.toolCallId,
+                result: output,
+                sectionTitle: outline.title,
+                sectionOrder: outline.order,
+              })}\n\n`);
+              break;
+            }
+
+            case "tool-error": {
+              res.write(`event: tool_error\ndata: ${JSON.stringify({
+                toolName: part.toolName,
+                toolCallId: part.toolCallId,
+                error: part.error instanceof Error ? part.error.message : String(part.error),
+                sectionTitle: outline.title,
+                sectionOrder: outline.order,
+              })}\n\n`);
+              break;
+            }
+
+            case "error": {
+              console.error(`Stream error in section ${outline.title}:`, part.error);
+              break;
+            }
+          }
+        }
+
+        // Ensure we have some content
+        if (!sectionMarkdown.trim()) {
+          sectionMarkdown = `## ${outline.title}\n\n本章节内容生成中出现问题，请稍后重试。`;
         }
 
         // Save section to database

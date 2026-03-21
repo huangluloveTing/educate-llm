@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, Select, Typography, message, Progress, Space } from "antd";
+import { Button, Card, Collapse, Form, Input, Select, Typography, message, Progress, Space, Tag, Spin } from "antd";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
@@ -12,6 +12,17 @@ type Section = {
   markdown: string;
 };
 
+type ToolCall = {
+  toolName: string;
+  toolCallId: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  status: "calling" | "completed" | "error";
+  sectionTitle?: string;
+  sectionOrder?: number;
+};
+
 export default function NewReportPage() {
   const [kbs, setKbs] = useState<Kb[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -19,6 +30,7 @@ export default function NewReportPage() {
   const [progress, setProgress] = useState(0);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
+  const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
 
   useEffect(() => {
     loadKbs();
@@ -39,6 +51,7 @@ export default function NewReportPage() {
     setProgress(0);
     setDownloadUrl(null);
     setReportId(null);
+    setToolCalls([]);
     setGenerating(true);
 
     const totalSections = 7; // Fixed outline has 7 sections
@@ -89,6 +102,37 @@ export default function NewReportPage() {
                   return newSections;
                 });
               }
+              else if (event === "tool_call") {
+                setToolCalls((prev) => [
+                  ...prev,
+                  {
+                    toolName: data.toolName,
+                    toolCallId: data.toolCallId,
+                    args: data.args,
+                    sectionTitle: data.sectionTitle,
+                    sectionOrder: data.sectionOrder,
+                    status: "calling",
+                  },
+                ]);
+              }
+              else if (event === "tool_result") {
+                setToolCalls((prev) =>
+                  prev.map((tc) =>
+                    tc.toolCallId === data.toolCallId
+                      ? { ...tc, result: data.result, status: "completed" }
+                      : tc,
+                  ),
+                );
+              }
+              else if (event === "tool_error") {
+                setToolCalls((prev) =>
+                  prev.map((tc) =>
+                    tc.toolCallId === data.toolCallId
+                      ? { ...tc, error: data.error, status: "error" }
+                      : tc,
+                  ),
+                );
+              }
               else if (event === "done") {
                 setProgress(100);
                 setDownloadUrl(data.downloadUrl);
@@ -111,6 +155,9 @@ export default function NewReportPage() {
       setGenerating(false);
     }
   }
+
+  // Get the most recent tool calls for display
+  const recentToolCalls = toolCalls.slice(-5);
 
   return (
     <div style={{ maxWidth: 1200 }}>
@@ -171,7 +218,76 @@ export default function NewReportPage() {
               <Typography.Text strong>正在生成章节...</Typography.Text>
               <Progress percent={progress} status="active" />
             </div>
+
+            {/* Show recent tool calls during generation */}
+            {recentToolCalls.length > 0 && (
+              <Card size="small" title="检索进度" style={{ marginTop: 16 }}>
+                {recentToolCalls.map((tc, i) => (
+                  <div key={tc.toolCallId || i} style={{ marginBottom: 8 }}>
+                    <Space>
+                      <Tag color={tc.status === "calling" ? "processing" : tc.status === "error" ? "error" : "success"}>
+                        {tc.toolName}
+                      </Tag>
+                      {tc.sectionTitle && (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {tc.sectionTitle}
+                        </Typography.Text>
+                      )}
+                      <Spin spinning={tc.status === "calling"} size="small" />
+                    </Space>
+                  </div>
+                ))}
+              </Card>
+            )}
           </Space>
+        )}
+
+        {/* Tool Calls Debug Panel (collapsible) */}
+        {toolCalls.length > 0 && !generating && (
+          <Card size="small" title="检索记录" style={{ marginTop: 24 }}>
+            <Collapse size="small">
+              {toolCalls.map((tc, i) => (
+                <Collapse.Panel
+                  key={tc.toolCallId || i}
+                  header={(
+                    <Space>
+                      <Tag color={tc.status === "calling" ? "processing" : tc.status === "error" ? "error" : "success"}>
+                        {tc.toolName}
+                      </Tag>
+                      {tc.sectionTitle && (
+                        <span style={{ fontSize: 12 }}>{tc.sectionTitle}</span>
+                      )}
+                    </Space>
+                  )}
+                >
+                  <div style={{ fontSize: 12 }}>
+                    <div>
+                      <strong>参数:</strong>
+                      <pre style={{ margin: 4, background: "#f5f5f5", padding: 8, borderRadius: 4, overflow: "auto" }}>
+                        {JSON.stringify(tc.args, null, 2)}
+                      </pre>
+                    </div>
+                    {tc.result !== undefined && (
+                      <div>
+                        <strong>结果:</strong>
+                        <pre style={{ margin: 4, background: "#f6ffed", padding: 8, borderRadius: 4, overflow: "auto", maxHeight: 200 }}>
+                          {JSON.stringify(tc.result, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    {tc.error && (
+                      <div>
+                        <strong>错误:</strong>
+                        <pre style={{ margin: 4, background: "#fff2f0", padding: 8, borderRadius: 4 }}>
+                          {tc.error}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                </Collapse.Panel>
+              ))}
+            </Collapse>
+          </Card>
         )}
 
         {sections.length > 0 && (

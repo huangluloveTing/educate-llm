@@ -1,4 +1,4 @@
-import { Button, Card, Input, Select, Typography, message, Space, Spin } from "antd";
+import { Button, Card, Collapse, Input, Select, Typography, message, Space, Spin, Tag } from "antd";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
@@ -12,11 +12,21 @@ type Message = {
 };
 
 type Source = {
+  ref: string;
   score: number;
   filename: string;
   documentId: string;
   chunkIndex: number;
   text: string;
+};
+
+type ToolCall = {
+  toolName: string;
+  toolCallId: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  status: "calling" | "completed" | "error";
 };
 
 export default function ChatPage() {
@@ -26,6 +36,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState<Source[]>([]);
+  const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
 
   useEffect(() => {
     loadKbs();
@@ -52,6 +63,7 @@ export default function ChatPage() {
     setInput("");
     setLoading(true);
     setSources([]);
+    setToolCalls([]);
 
     const assistantMessage: Message = { role: "assistant", content: "" };
     setMessages((prev) => [...prev, assistantMessage]);
@@ -111,6 +123,35 @@ export default function ChatPage() {
                   }
                   return newMessages;
                 });
+              }
+              else if (event === "tool_call") {
+                setToolCalls((prev) => [
+                  ...prev,
+                  {
+                    toolName: data.toolName,
+                    toolCallId: data.toolCallId,
+                    args: data.args,
+                    status: "calling",
+                  },
+                ]);
+              }
+              else if (event === "tool_result") {
+                setToolCalls((prev) =>
+                  prev.map((tc) =>
+                    tc.toolCallId === data.toolCallId
+                      ? { ...tc, result: data.result, status: "completed" }
+                      : tc,
+                  ),
+                );
+              }
+              else if (event === "tool_error") {
+                setToolCalls((prev) =>
+                  prev.map((tc) =>
+                    tc.toolCallId === data.toolCallId
+                      ? { ...tc, error: data.error, status: "error" }
+                      : tc,
+                  ),
+                );
               }
               else if (event === "done") {
                 setLoading(false);
@@ -194,12 +235,60 @@ export default function ChatPage() {
             )}
           </div>
 
+          {/* Tool Calls Debug Panel */}
+          {toolCalls.length > 0 && (
+            <Card size="small" title="工具调用">
+              <Collapse size="small">
+                {toolCalls.map((tc, i) => (
+                  <Collapse.Panel
+                    key={tc.toolCallId || i}
+                    header={(
+                      <Space>
+                        <Tag color={tc.status === "calling" ? "processing" : tc.status === "error" ? "error" : "success"}>
+                          {tc.toolName}
+                        </Tag>
+                        <span style={{ fontSize: 12, color: "#999" }}>
+                          {tc.status === "calling" ? "调用中..." : tc.status === "error" ? "失败" : "完成"}
+                        </span>
+                      </Space>
+                    )}
+                  >
+                    <div style={{ fontSize: 12 }}>
+                      <div>
+                        <strong>参数:</strong>
+                        <pre style={{ margin: 4, background: "#f5f5f5", padding: 8, borderRadius: 4, overflow: "auto" }}>
+                          {JSON.stringify(tc.args, null, 2)}
+                        </pre>
+                      </div>
+                      {tc.result !== undefined && (
+                        <div>
+                          <strong>结果:</strong>
+                          <pre style={{ margin: 4, background: "#f6ffed", padding: 8, borderRadius: 4, overflow: "auto", maxHeight: 200 }}>
+                            {JSON.stringify(tc.result, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      {tc.error && (
+                        <div>
+                          <strong>错误:</strong>
+                          <pre style={{ margin: 4, background: "#fff2f0", padding: 8, borderRadius: 4 }}>
+                            {tc.error}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  </Collapse.Panel>
+                ))}
+              </Collapse>
+            </Card>
+          )}
+
           {sources.length > 0 && (
             <Card size="small" title="参考资料">
               {sources.map((src, i) => (
                 <div key={i} style={{ marginBottom: 8 }}>
                   <Typography.Text strong>
-                    资料 {i + 1}: {src.filename} (chunk {src.chunkIndex}, 相似度: {src.score.toFixed(3)})
+                    {src.ref}: {src.filename} (chunk {src.chunkIndex}, 相似度: {src.score.toFixed(3)})
                   </Typography.Text>
                   <Typography.Paragraph
                     type="secondary"

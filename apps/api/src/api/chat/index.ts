@@ -1,11 +1,10 @@
-import { streamText } from "ai";
+import { streamText, stepCountIs } from "ai";
 import express from "express";
 
 import { requireAuth } from "../../auth/middleware.js";
 import { env } from "../../env.js";
 import { createAiSdkModel } from "../../llm/ai-sdk-model.js";
-import { embedQuery } from "../../services/embeddings.js";
-import { getCollectionName, getQdrantClient } from "../../services/qdrant.js";
+import { createRagTools, RAG_SYSTEM_PROMPT } from "../../llm/rag-tools.js";
 
 const router = express.Router();
 
@@ -31,13 +30,42 @@ router.post("/chat/stream", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "用户消息不能为空" });
     }
 
-    const topK = Math.min(Math.max(body.retrieval?.topK ?? 5, 1), 20);
+    // Set SSE headers
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.write(":ok\n\n");
 
-    // Retrieve (best-effort). If retrieval fails / no hits, still chat normally.
-    const qdrant = getQdrantClient();
-    const collectionName = getCollectionName(body.kbId);
+    // Create model and tools
+    const model = createAiSdkModel();
+    const tools = createRagTools({
+      kbId: body.kbId,
+      defaultTopK: body.retrieval?.topK ?? 5,
+    });
 
-    let sources: Array<{
+    // Send initial empty sources
+    res.write(`event: sources\ndata: ${JSON.stringify({ sources: [], hasSources: false })}\n\n`);
+
+    // Build messages with system prompt
+    const messages = [
+      { role: "system" as const, content: RAG_SYSTEM_PROMPT },
+      ...body.messages,
+    ];
+
+    // Stream with tool calling
+    const result = streamText({
+      model,
+      messages,
+      tools,
+      toolChoice: "auto",
+      stopWhen: stepCountIs(4), // Allow up to 4 steps (e.g., search -> answer or multiple searches)
+      temperature: 0.2,
+    });
+
+    // Track all sources from tool calls
+    const allSources: Array<{
+      ref: string;
       score: number;
       filename: string;
       documentId: string;
@@ -45,82 +73,65 @@ router.post("/chat/stream", requireAuth, async (req, res) => {
       text: string;
     }> = [];
 
-    try {
-      const queryVector = await embedQuery(lastUser.content.trim());
+    // Process fullStream for SSE events
+    for await (const part of result.fullStream) {
+      switch (part.type) {
+        case "text-delta": {
+          res.write(`event: token\ndata: ${JSON.stringify({ content: part.text })}\n\n`);
+          break;
+        }
 
-      const hits = await qdrant.search(collectionName, {
-        vector: queryVector,
-        limit: topK,
-        with_payload: true,
-        with_vector: false,
-        filter: {
-          must: [{
-            key: "kbId",
-            match: { value: body.kbId },
-          }],
-        },
-      });
+        case "tool-call": {
+          // Send tool call event
+          res.write(`event: tool_call\ndata: ${JSON.stringify({
+            toolName: part.toolName,
+            toolCallId: part.toolCallId,
+            args: part.input,
+          })}\n\n`);
+          break;
+        }
 
-      sources = hits.map(h => ({
-        score: h.score,
-        filename: (h.payload as any)?.filename as string,
-        documentId: (h.payload as any)?.documentId as string,
-        chunkIndex: (h.payload as any)?.chunkIndex as number,
-        text: ((h.payload as any)?.text as string)?.slice(0, 5000),
-      }));
-    }
-    catch (error) {
-      // e.g. collection not found, embeddings service error, etc.
-      console.warn("RAG retrieval failed, falling back to normal chat:", error);
-      sources = [];
-    }
+        case "tool-result": {
+          // Extract sources from result if present
+          const output = part.output as { sources?: typeof allSources; error?: string } | undefined;
+          if (output?.sources && output.sources.length > 0) {
+            allSources.push(...output.sources);
+            // Send updated sources
+            res.write(`event: sources\ndata: ${JSON.stringify({ sources: allSources, hasSources: true })}\n\n`);
+          }
 
-    const hasSources = sources.length > 0;
+          // Send tool result event
+          res.write(`event: tool_result\ndata: ${JSON.stringify({
+            toolName: part.toolName,
+            toolCallId: part.toolCallId,
+            result: output,
+          })}\n\n`);
+          break;
+        }
 
-    const contextText = sources
-      .map((s, i) => `[资料${i + 1}] 文件: ${s.filename} (chunk ${s.chunkIndex})\n${s.text}`)
-      .join("\n\n");
+        case "tool-error": {
+          res.write(`event: tool_error\ndata: ${JSON.stringify({
+            toolName: part.toolName,
+            toolCallId: part.toolCallId,
+            error: part.error instanceof Error ? part.error.message : String(part.error),
+          })}\n\n`);
+          break;
+        }
 
-    const systemPrompt = hasSources
-      ? `你是一位教育研究助手。请严格基于提供的参考资料回答问题。
-- 如果资料不足以支持结论，请明确说明"不确定/资料不足"。
-- 在回答中引用资料来源，格式为：(资料1)、(资料2)。
+        case "error": {
+          res.write(`event: error\ndata: ${JSON.stringify({ message: String(part.error) })}\n\n`);
+          break;
+        }
 
-参考资料：
-${contextText}`
-      : `你是一位教育研究助手。当前知识库未检索到与用户问题直接相关的参考资料。
-请基于通用教育学知识与常识进行回答，并明确说明这是在"无参考资料"情况下的通用建议。
-如果用户需要基于资料的结论，请提示用户：上传/补充相关文档，或更换更具体的关键词再提问。`;
-
-    const messages = [
-      { role: "system" as const, content: systemPrompt },
-      ...body.messages,
-    ];
-
-    const model = createAiSdkModel();
-
-    const result = streamText({
-      model,
-      messages,
-      temperature: 0.2,
-    });
-
-    // 发送 sources 作为自定义数据（在流之前）
-    const sourcesJson = JSON.stringify({ sources, hasSources });
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-
-    // 先发送 sources
-    res.write(`event: sources\ndata: ${sourcesJson}\n\n`);
-
-    // 流式输出文本
-    for await (const chunk of result.textStream) {
-      res.write(`event: token\ndata: ${JSON.stringify({ content: chunk })}\n\n`);
+        case "finish": {
+          // Final sources update
+          res.write(`event: sources\ndata: ${JSON.stringify({ sources: allSources, hasSources: allSources.length > 0 })}\n\n`);
+          break;
+        }
+      }
     }
 
-    // 发送完成
+    // Send done
     res.write(`event: done\ndata: {}\n\n`);
     res.end();
   }
