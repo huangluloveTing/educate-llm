@@ -1,42 +1,37 @@
-import { Button, Card, Collapse, Input, Select, Typography, message, Space, Spin, Tag } from "antd";
+import { Button, Card, Collapse, Input, Select, Typography, message, Space, Tag } from "antd";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport, type UIMessage } from "ai";
 
 import { apiFetch } from "../lib/api";
 
 type Kb = { id: string; name: string };
 
-type Message = {
-  role: "user" | "assistant";
-  content: string;
-};
-
-type Source = {
-  ref: string;
-  score: number;
-  filename: string;
-  documentId: string;
-  chunkIndex: number;
-  text: string;
-};
-
-type ToolCall = {
-  toolName: string;
-  toolCallId: string;
-  args: Record<string, unknown>;
-  result?: unknown;
-  error?: string;
-  status: "calling" | "completed" | "error";
-};
-
 export default function ChatPage() {
   const [kbs, setKbs] = useState<Kb[]>([]);
   const [selectedKb, setSelectedKb] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [sources, setSources] = useState<Source[]>([]);
-  const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
+
+  // Get access token for authorization
+  const getAccessToken = () => localStorage.getItem("accessToken");
+
+  const {
+    messages,
+    sendMessage,
+    status,
+    error,
+  } = useChat({
+    transport: new DefaultChatTransport({
+      api: `${import.meta.env.VITE_API_BASE_URL}/chat/stream`,
+      headers: async () => ({
+        Authorization: `Bearer ${getAccessToken()}`,
+      }),
+      body: {
+        kbId: selectedKb,
+      },
+    }),
+  });
 
   useEffect(() => {
     loadKbs();
@@ -55,126 +50,73 @@ export default function ChatPage() {
     }
   }
 
-  async function sendMessage() {
+  const handleSendMessage = async () => {
     if (!input.trim() || !selectedKb) return;
 
-    const userMessage: Message = { role: "user", content: input.trim() };
-    setMessages((prev) => [...prev, userMessage]);
+    const text = input.trim();
     setInput("");
-    setLoading(true);
-    setSources([]);
-    setToolCalls([]);
 
-    const assistantMessage: Message = { role: "assistant", content: "" };
-    setMessages((prev) => [...prev, assistantMessage]);
+    await sendMessage({ text });
+  };
 
-    try {
-      const token = localStorage.getItem("accessToken");
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/chat/stream`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          kbId: selectedKb,
-          messages: [...messages, userMessage],
-          retrieval: { topK: 5 },
-        }),
-      });
+  // Get all sources from the last assistant message
+  const getLastAssistantSources = () => {
+    const lastAssistant = [...messages].reverse().find(m => m.role === "assistant");
+    if (!lastAssistant?.parts) return [];
 
-      if (!response.ok) {
-        throw new Error("聊天请求失败");
-      }
+    const sources: Array<{
+      ref: string;
+      score: number;
+      filename: string;
+      documentId: string;
+      chunkIndex: number;
+      text: string;
+    }> = [];
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("无响应内容");
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          if (line.startsWith("event:")) {
-            const event = line.slice(6).trim();
-            const nextLine = lines[i + 1];
-            if (nextLine && nextLine.startsWith("data:")) {
-              const data = JSON.parse(nextLine.slice(5).trim());
-
-              if (event === "sources") {
-                setSources(data.sources || []);
-              }
-              else if (event === "token") {
-                setMessages((prev) => {
-                  const newMessages = [...prev];
-                  const lastMsg = newMessages[newMessages.length - 1];
-                  if (lastMsg && lastMsg.role === "assistant") {
-                    lastMsg.content += data.content || "";
-                  }
-                  return newMessages;
-                });
-              }
-              else if (event === "tool_call") {
-                setToolCalls((prev) => [
-                  ...prev,
-                  {
-                    toolName: data.toolName,
-                    toolCallId: data.toolCallId,
-                    args: data.args,
-                    status: "calling",
-                  },
-                ]);
-              }
-              else if (event === "tool_result") {
-                setToolCalls((prev) =>
-                  prev.map((tc) =>
-                    tc.toolCallId === data.toolCallId
-                      ? { ...tc, result: data.result, status: "completed" }
-                      : tc,
-                  ),
-                );
-              }
-              else if (event === "tool_error") {
-                setToolCalls((prev) =>
-                  prev.map((tc) =>
-                    tc.toolCallId === data.toolCallId
-                      ? { ...tc, error: data.error, status: "error" }
-                      : tc,
-                  ),
-                );
-              }
-              else if (event === "done") {
-                setLoading(false);
-              }
-              else if (event === "error") {
-                message.error(data.message || "聊天出错");
-                setLoading(false);
-              }
-              i++; // Skip the data line
-            }
-          }
+    for (const part of lastAssistant.parts) {
+      // Check for tool-kbSearch parts with output
+      if (part.type === "tool-kbSearch" && "output" in part && part.output) {
+        const output = part.output as { sources?: typeof sources } | undefined;
+        if (output?.sources) {
+          sources.push(...output.sources);
         }
       }
     }
-    catch (e) {
-      message.error(e instanceof Error ? e.message : "聊天失败");
-      // Remove incomplete assistant message
-      setMessages((prev) => prev.filter((m) => m.content.length > 0 || m.role !== "assistant"));
+    return sources;
+  };
+
+  // Get tool invocations from a message
+  const getToolInvocations = (msg: UIMessage) => {
+    if (!msg.parts) return [];
+    // Filter for tool parts (type starts with "tool-") or dynamic-tool
+    return msg.parts.filter((p) =>
+      p.type.startsWith("tool-") || p.type === "dynamic-tool",
+    );
+  };
+
+  const sources = getLastAssistantSources();
+  const isLoading = status === "submitted" || status === "streaming";
+
+  // Extract tool name from part type
+  const getToolName = (part: { type: string }): string => {
+    if (part.type === "dynamic-tool") {
+      return (part as { toolName?: string }).toolName || "unknown";
     }
-    finally {
-      setLoading(false);
+    if (part.type.startsWith("tool-")) {
+      return part.type.replace("tool-", "");
     }
-  }
+    return "unknown";
+  };
+
+  // Get status from tool part
+  const getToolStatus = (part: { type: string; state?: string }): "calling" | "completed" | "error" => {
+    if ("state" in part) {
+      const state = (part as { state: string }).state;
+      if (state === "output-error") return "error";
+      if (state === "output-available") return "completed";
+    }
+    return "calling";
+  };
 
   return (
     <div style={{ maxWidth: 1200 }}>
@@ -214,7 +156,7 @@ export default function ChatPage() {
             )}
             {messages.map((msg, i) => (
               <div
-                key={i}
+                key={msg.id || i}
                 style={{
                   marginBottom: 16,
                   padding: 12,
@@ -224,61 +166,83 @@ export default function ChatPage() {
               >
                 <Typography.Text strong>{msg.role === "user" ? "你" : "助手"}:</Typography.Text>
                 <div style={{ marginTop: 4 }}>
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  {msg.role === "assistant" ? (
+                    <>
+                      {/* Render text parts */}
+                      {msg.parts?.filter(p => p.type === "text").map((part, j) => (
+                        <ReactMarkdown key={j}>{(part as { text: string }).text}</ReactMarkdown>
+                      ))}
+                    </>
+                  ) : (
+                    <ReactMarkdown>{msg.parts?.filter(p => p.type === "text").map(p => (p as { text: string }).text).join("")}</ReactMarkdown>
+                  )}
                 </div>
               </div>
             ))}
-            {loading && (
+            {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
               <div style={{ textAlign: "center", padding: 16 }}>
-                <Spin />
+                <Tag color="processing">思考中...</Tag>
               </div>
             )}
           </div>
 
           {/* Tool Calls Debug Panel */}
-          {toolCalls.length > 0 && (
+          {messages.length > 0 && (
             <Card size="small" title="工具调用">
               <Collapse size="small">
-                {toolCalls.map((tc, i) => (
-                  <Collapse.Panel
-                    key={tc.toolCallId || i}
-                    header={(
-                      <Space>
-                        <Tag color={tc.status === "calling" ? "processing" : tc.status === "error" ? "error" : "success"}>
-                          {tc.toolName}
-                        </Tag>
-                        <span style={{ fontSize: 12, color: "#999" }}>
-                          {tc.status === "calling" ? "调用中..." : tc.status === "error" ? "失败" : "完成"}
-                        </span>
-                      </Space>
-                    )}
-                  >
-                    <div style={{ fontSize: 12 }}>
-                      <div>
-                        <strong>参数:</strong>
-                        <pre style={{ margin: 4, background: "#f5f5f5", padding: 8, borderRadius: 4, overflow: "auto" }}>
-                          {JSON.stringify(tc.args, null, 2)}
-                        </pre>
-                      </div>
-                      {tc.result !== undefined && (
-                        <div>
-                          <strong>结果:</strong>
-                          <pre style={{ margin: 4, background: "#f6ffed", padding: 8, borderRadius: 4, overflow: "auto", maxHeight: 200 }}>
-                            {JSON.stringify(tc.result, null, 2)}
-                          </pre>
+                {messages.flatMap((msg, msgIdx) =>
+                  getToolInvocations(msg).map((part, partIdx) => {
+                    const key = `${msg.id || msgIdx}-${partIdx}`;
+                    const toolName = getToolName(part);
+                    const toolStatus = getToolStatus(part);
+                    const input = "input" in part ? (part as { input?: unknown }).input : undefined;
+                    const output = "output" in part ? (part as { output?: unknown }).output : undefined;
+                    const errorText = "errorText" in part ? (part as { errorText?: string }).errorText : undefined;
+
+                    return (
+                      <Collapse.Panel
+                        key={key}
+                        header={(
+                          <Space>
+                            <Tag color={toolStatus === "calling" ? "processing" : toolStatus === "error" ? "error" : "success"}>
+                              {toolName}
+                            </Tag>
+                            <span style={{ fontSize: 12, color: "#999" }}>
+                              {toolStatus === "calling" ? "调用中..." : toolStatus === "error" ? "失败" : "完成"}
+                            </span>
+                          </Space>
+                        )}
+                      >
+                        <div style={{ fontSize: 12 }}>
+                          {input !== undefined && (
+                            <div>
+                              <strong>参数:</strong>
+                              <pre style={{ margin: 4, background: "#f5f5f5", padding: 8, borderRadius: 4, overflow: "auto" }}>
+                                {JSON.stringify(input, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          {output !== undefined && (
+                            <div>
+                              <strong>结果:</strong>
+                              <pre style={{ margin: 4, background: "#f6ffed", padding: 8, borderRadius: 4, overflow: "auto", maxHeight: 200 }}>
+                                {JSON.stringify(output, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          {errorText && (
+                            <div>
+                              <strong>错误:</strong>
+                              <pre style={{ margin: 4, background: "#fff2f0", padding: 8, borderRadius: 4 }}>
+                                {errorText}
+                              </pre>
+                            </div>
+                          )}
                         </div>
-                      )}
-                      {tc.error && (
-                        <div>
-                          <strong>错误:</strong>
-                          <pre style={{ margin: 4, background: "#fff2f0", padding: 8, borderRadius: 4 }}>
-                            {tc.error}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-                  </Collapse.Panel>
-                ))}
+                      </Collapse.Panel>
+                    );
+                  }),
+                )}
               </Collapse>
             </Card>
           )}
@@ -302,15 +266,21 @@ export default function ChatPage() {
             </Card>
           )}
 
+          {error && (
+            <Typography.Text type="danger">
+              错误: {error.message}
+            </Typography.Text>
+          )}
+
           <Space.Compact style={{ width: "100%" }}>
             <Input
               placeholder="输入你的问题..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onPressEnter={sendMessage}
-              disabled={!selectedKb || loading}
+              onPressEnter={handleSendMessage}
+              disabled={!selectedKb || isLoading}
             />
-            <Button type="primary" onClick={sendMessage} disabled={!selectedKb || loading || !input.trim()}>
+            <Button type="primary" onClick={handleSendMessage} disabled={!selectedKb || isLoading || !input.trim()}>
               发送
             </Button>
           </Space.Compact>

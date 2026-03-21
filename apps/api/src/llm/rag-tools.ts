@@ -76,7 +76,7 @@ export function createRagTools(options: {
               filename: ((hit.payload as any)?.filename as string) || "未知文件",
               documentId: ((hit.payload as any)?.documentId as string) || "",
               chunkIndex: ((hit.payload as any)?.chunkIndex as number) || 0,
-              text: text.length > maxTextLength ? text.slice(0, maxTextLength) + "..." : text,
+              text: text.length > maxTextLength ? `${text.slice(0, maxTextLength)}...` : text,
             };
           });
 
