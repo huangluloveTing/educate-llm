@@ -36,6 +36,7 @@ model User {
 
   documents    Document[]
   reports      ReportJob[]
+  conversations Conversation[]
   auditLogs    AuditLog[] @relation("Actor")
 }
 
@@ -46,8 +47,9 @@ model KnowledgeBase {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  documents   Document[]
-  reports     ReportJob[]
+  documents     Document[]
+  reports       ReportJob[]
+  conversations Conversation[]
 }
 
 model Document {
@@ -114,4 +116,35 @@ model AuditLog {
   metaJson   Json?
 
   createdAt  DateTime @default(now())
+}
+
+model Conversation {
+  id          String   @id @default(cuid())
+  title       String?
+  systemPrompt String?
+
+  kbId        String?
+  kb          KnowledgeBase? @relation(fields: [kbId], references: [id], onDelete: SetNull)
+
+  createdById String
+  createdBy   User           @relation(fields: [createdById], references: [id])
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  messages    Message[]
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  role          String  // "user" | "assistant" | "system"
+  content       String
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([conversationId])
 }
