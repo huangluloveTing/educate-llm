@@ -1,4 +1,5 @@
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import { v4 as uuidv4 } from "uuid";
 
 import { prisma } from "../db/prisma.js";
 import { embedTexts } from "./embeddings.js";
@@ -61,7 +62,7 @@ export async function ingestDocument(documentId: string): Promise<void> {
     const collectionName = getCollectionName(document.kbId);
 
     const points = chunks.map((chunk, index) => ({
-      id: `${documentId}:${index}`,
+      id: uuidv4(), // Qdrant requires UUID or unsigned integer for point IDs
       vector: vectors[index],
       payload: {
         kbId: document.kbId,
