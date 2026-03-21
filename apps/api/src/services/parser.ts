@@ -22,11 +22,12 @@ export async function parseDocument(filePath: string, mime: string): Promise<str
 }
 
 async function parsePDF(filePath: string): Promise<string> {
-  // pdf-parse v1.x uses default export
-  const pdfParse = (await import("pdf-parse")).default;
+  // pdf-parse v2.x uses class-based API
+  const { PDFParse } = await import("pdf-parse");
   const buffer = await fs.readFile(filePath);
-  const data = await (pdfParse as any)(buffer);
-  return data.text;
+  const parser = new PDFParse({ data: buffer });
+  const result = await parser.getText();
+  return result.text;
 }
 
 async function parseDOCX(filePath: string): Promise<string> {
