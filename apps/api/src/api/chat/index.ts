@@ -1,4 +1,4 @@
-import { streamText, stepCountIs } from "ai";
+import { convertToModelMessages, streamText, stepCountIs, type UIMessage } from "ai";
 import express from "express";
 
 import { requireAuth } from "../../auth/middleware.js";
@@ -10,7 +10,7 @@ const router = express.Router();
 
 type ChatReqBody = {
   kbId: string;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  messages: UIMessage[];
 };
 
 router.post("/chat/stream", requireAuth, async (req, res) => {
@@ -24,10 +24,8 @@ router.post("/chat/stream", requireAuth, async (req, res) => {
       return res.status(500).json({ message: "LLM_API_KEY 未配置" });
     }
 
-    const lastUser = [...body.messages].reverse().find(m => m.role === "user");
-    if (!lastUser || !lastUser.content?.trim()) {
-      return res.status(400).json({ message: "用户消息不能为空" });
-    }
+    // Convert UIMessage to ModelMessage format
+    const modelMessages = await convertToModelMessages(body.messages);
 
     // Create model and tools
     const model = createAiSdkModel();
@@ -39,7 +37,7 @@ router.post("/chat/stream", requireAuth, async (req, res) => {
     // Build messages with system prompt
     const messages = [
       { role: "system" as const, content: RAG_SYSTEM_PROMPT },
-      ...body.messages,
+      ...modelMessages,
     ];
 
     // Stream with tool calling
