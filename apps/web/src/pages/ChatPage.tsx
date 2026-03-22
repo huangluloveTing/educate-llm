@@ -129,6 +129,7 @@ export default function ChatPage() {
   } = useChat({
     id: "chat",
     transport,
+    experimental_throttle: 40
   });
 
   const isLoading = status === "submitted" || status === "streaming";
