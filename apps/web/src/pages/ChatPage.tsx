@@ -1,9 +1,10 @@
-import { Button, Card, Collapse, Drawer, Form, Input, List, Modal, Select, Space, Tag, Typography, message } from "antd";
-import { useEffect, useState } from "react";
+import { Bubble, Conversations, Sender, type ConversationItemType } from "@ant-design/x";
+import { Card, Collapse, Drawer, Form, Input, Select, Space, Tag, Typography, message } from "antd";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { MessageOutlined, SettingOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
+import { SettingOutlined, PlusOutlined } from "@ant-design/icons";
 
 import { apiFetch } from "../lib/api";
 
@@ -17,7 +18,15 @@ type Conversation = {
   kb: { id: string; name: string } | null;
   createdAt: string;
   updatedAt: string;
-  _count?: { messages: number };
+};
+
+type SourceInfo = {
+  ref: string;
+  score: number;
+  filename: string;
+  documentId: string;
+  chunkIndex: number;
+  text: string;
 };
 
 export default function ChatPage() {
@@ -26,7 +35,6 @@ export default function ChatPage() {
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editModalOpen, setEditModalOpen] = useState(false);
   const [editForm] = Form.useForm();
 
   // Load KBs and conversations
@@ -39,8 +47,7 @@ export default function ChatPage() {
     try {
       const data = await apiFetch<Kb[]>("/kb");
       setKbs(data);
-    }
-    catch (e) {
+    } catch (e) {
       message.error(e instanceof Error ? e.message : "加载知识库失败");
     }
   }
@@ -52,8 +59,7 @@ export default function ChatPage() {
       if (data.length > 0 && !selectedConversation) {
         setSelectedConversation(data[0]);
       }
-    }
-    catch (e) {
+    } catch (e) {
       message.error(e instanceof Error ? e.message : "加载会话列表失败");
     }
   }
@@ -67,8 +73,7 @@ export default function ChatPage() {
       setConversations([data, ...conversations]);
       setSelectedConversation(data);
       message.success("创建成功");
-    }
-    catch (e) {
+    } catch (e) {
       message.error(e instanceof Error ? e.message : "创建会话失败");
     }
   }
@@ -76,13 +81,12 @@ export default function ChatPage() {
   async function deleteConversation(id: string) {
     try {
       await apiFetch(`/conversations/${id}`, { method: "DELETE" });
-      setConversations(conversations.filter(c => c.id !== id));
+      setConversations(conversations.filter((c) => c.id !== id));
       if (selectedConversation?.id === id) {
-        setSelectedConversation(conversations.find(c => c.id !== id) || null);
+        setSelectedConversation(conversations.find((c) => c.id !== id) || null);
       }
       message.success("删除成功");
-    }
-    catch (e) {
+    } catch (e) {
       message.error(e instanceof Error ? e.message : "删除会话失败");
     }
   }
@@ -95,76 +99,74 @@ export default function ChatPage() {
         method: "PATCH",
         body: JSON.stringify(values),
       });
-      setConversations(conversations.map(c => c.id === data.id ? data : c));
+      setConversations(conversations.map((c) => (c.id === data.id ? data : c)));
       setSelectedConversation(data);
-      setEditModalOpen(false);
+      setDrawerOpen(false);
       message.success("更新成功");
-    }
-    catch (e) {
+    } catch (e) {
       message.error(e instanceof Error ? e.message : "更新会话失败");
     }
   }
 
-  const getAccessToken = () => localStorage.getItem("accessToken");
+  const getAccessToken = useCallback(() => localStorage.getItem("accessToken"), []);
+
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: `${import.meta.env.VITE_API_BASE_URL}/chat/stream`,
+        headers: async () => ({
+          Authorization: `Bearer ${getAccessToken()}`,
+        }),
+      }),
+    [getAccessToken]
+  );
 
   const {
     messages,
     sendMessage,
     status,
     error,
-    setMessages,
   } = useChat({
-    transport: new DefaultChatTransport({
-      api: `${import.meta.env.VITE_API_BASE_URL}/chat/stream`,
-      headers: async () => ({
-        Authorization: `Bearer ${getAccessToken()}`,
-      }),
-      body: {
-        conversationId: selectedConversation?.id,
-      },
-    }),
+    id: "chat",
+    transport,
   });
 
-  const handleSendMessage = async () => {
-    if (!input.trim() || !selectedConversation) return;
+  const isLoading = status === "submitted" || status === "streaming";
 
-    const text = input.trim();
-    setInput("");
-    await sendMessage({ text });
-  };
+  const handleSend = useCallback(
+    (content: string) => {
+      if (!content.trim() || !selectedConversation) return;
+      sendMessage(
+        { text: content },
+        { body: { conversationId: selectedConversation.id } }
+      );
+    },
+    [selectedConversation, sendMessage]
+  );
 
   // Get all sources from the last assistant message
-  const getLastAssistantSources = () => {
-    const lastAssistant = [...messages].reverse().find(m => m.role === "assistant");
+  const getLastAssistantSources = useCallback((): SourceInfo[] => {
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
     if (!lastAssistant?.parts) return [];
 
-    const sources: Array<{
-      ref: string;
-      score: number;
-      filename: string;
-      documentId: string;
-      chunkIndex: number;
-      text: string;
-    }> = [];
-
+    const sources: SourceInfo[] = [];
     for (const part of lastAssistant.parts) {
       if (part.type === "tool-output-available") {
-        const output = part.output as { sources?: typeof sources } | undefined;
+        const output = part.output as { sources?: SourceInfo[] } | undefined;
         if (output?.sources) {
           sources.push(...output.sources);
         }
       }
     }
     return sources;
-  };
+  }, [messages]);
 
-  const getToolInvocations = (msg: UIMessage) => {
+  const getToolInvocations = useCallback((msg: UIMessage) => {
     if (!msg.parts) return [];
     return msg.parts.filter((p) => p.type.startsWith("tool-") || p.type === "dynamic-tool");
-  };
+  }, []);
 
   const sources = getLastAssistantSources();
-  const isLoading = status === "submitted" || status === "streaming";
 
   const getToolName = (part: { type: string }): string => {
     if (part.type === "dynamic-tool") {
@@ -185,164 +187,102 @@ export default function ChatPage() {
     return "calling";
   };
 
-  const openEditModal = () => {
-    if (selectedConversation) {
-      editForm.setFieldsValue({
-        title: selectedConversation.title || "",
-        kbId: selectedConversation.kbId || undefined,
-        systemPrompt: selectedConversation.systemPrompt || "",
-      });
-      setEditModalOpen(true);
-    }
-  };
+  // 转换会话列表
+  const conversationItems: ConversationItemType[] = conversations.map((conv) => ({
+    key: conv.id,
+    label: conv.title || "未命名会话",
+    description: conv.kb?.name || "未选择知识库",
+  }));
 
-  return (
-    <div style={{ maxWidth: 1400, display: "flex", gap: 16 }}>
-      {/* Conversation List Sidebar */}
-      <Card style={{ width: 280, flexShrink: 0 }} bodyStyle={{ padding: 12 }}>
-        <Space direction="vertical" style={{ width: "100%" }}>
-          <Button type="primary" icon={<PlusOutlined />} block onClick={createConversation}>
-            新建会话
-          </Button>
+  // 自定义消息渲染
+  const renderMessage = useCallback(
+    (msgInfo: { content: string; role: string; key?: string }) => {
+      const isUser = msgInfo.role === "user";
+      const msg = messages.find((m) => m.id === msgInfo.key);
+      const toolInvocations = msg ? getToolInvocations(msg) : [];
 
-          <div style={{ height: 500, overflowY: "auto" }}>
-            <List
-              dataSource={conversations}
-              renderItem={(conv) => (
-                <List.Item
-                  onClick={() => setSelectedConversation(conv)}
-                  style={{
-                    cursor: "pointer",
-                    padding: "8px 12px",
-                    borderRadius: 4,
-                    backgroundColor: selectedConversation?.id === conv.id ? "#e6f7ff" : "transparent",
-                  }}
-                  actions={[
-                    <DeleteOutlined
-                      key="delete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteConversation(conv.id);
-                      }}
-                    />,
-                  ]}
-                >
-                  <List.Item.Meta
-                    title={conv.title || "未命名会话"}
-                    description={conv.kb?.name || "未选择知识库"}
-                  />
-                </List.Item>
-              )}
-            />
-          </div>
-        </Space>
-      </Card>
+      return (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: 12,
+            backgroundColor: isUser ? "#e6f7ff" : "#f5f5f5",
+            borderRadius: 8,
+            maxWidth: "80%",
+            marginLeft: isUser ? "auto" : 0,
+          }}
+        >
+          <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
+            {isUser ? "你" : "助手"}
+          </Typography.Text>
 
-      {/* Main Chat Area */}
-      <Card style={{ flex: 1 }} bodyStyle={{ padding: 16 }}>
-        <Space direction="vertical" style={{ width: "100%" }} size="large">
-          {/* Header */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <Typography.Title level={4} style={{ margin: 0 }}>
-              {selectedConversation?.title || "选择一个会话"}
-            </Typography.Title>
-            {selectedConversation && (
-              <Button icon={<SettingOutlined />} onClick={openEditModal}>
-                设置
-              </Button>
-            )}
+          {/* 消息内容 */}
+          <div style={{ whiteSpace: "pre-wrap" }}>
+            <ReactMarkdown>{msgInfo.content}</ReactMarkdown>
           </div>
 
-          {/* Knowledge Base Info */}
-          {selectedConversation?.kb && (
-            <Tag color="blue">知识库: {selectedConversation.kb.name}</Tag>
-          )}
-
-          {/* Messages */}
-          <div
-            style={{
-              height: 400,
-              overflowY: "auto",
-              border: "1px solid #d9d9d9",
-              borderRadius: 4,
-              padding: 16,
-            }}
-          >
-            {!selectedConversation && (
-              <Typography.Text type="secondary">请选择或创建一个会话开始聊天</Typography.Text>
-            )}
-            {messages.length === 0 && selectedConversation && (
-              <Typography.Text type="secondary">开始对话...</Typography.Text>
-            )}
-            {messages.map((msg, i) => (
-              <div
-                key={msg.id || i}
-                style={{
-                  marginBottom: 16,
-                  padding: 12,
-                  backgroundColor: msg.role === "user" ? "#e6f7ff" : "#f5f5f5",
-                  borderRadius: 4,
-                }}
-              >
-                <Typography.Text strong>{msg.role === "user" ? "你" : "助手"}:</Typography.Text>
-                <div style={{ marginTop: 4 }}>
-                  {msg.role === "assistant" ? (
-                    <>
-                      {msg.parts?.filter(p => p.type === "text").map((part, j) => (
-                        <ReactMarkdown key={j}>{(part as { text: string }).text}</ReactMarkdown>
-                      ))}
-                    </>
-                  ) : (
-                    <ReactMarkdown>{msg.parts?.filter(p => p.type === "text").map(p => (p as { text: string }).text).join("")}</ReactMarkdown>
-                  )}
-                </div>
-              </div>
-            ))}
-            {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
-              <div style={{ textAlign: "center", padding: 16 }}>
-                <Tag color="processing">思考中...</Tag>
-              </div>
-            )}
-          </div>
-
-          {/* Tool Calls */}
-          {messages.length > 0 && (
-            <Collapse size="small">
-              <Collapse.Panel header="工具调用" key="tools">
-                {messages.flatMap((msg, msgIdx) =>
-                  getToolInvocations(msg).map((part, partIdx) => {
-                    const key = `${msg.id || msgIdx}-${partIdx}`;
+          {/* 工具调用信息 */}
+          {toolInvocations.length > 0 && (
+            <Collapse
+              size="small"
+              style={{ marginTop: 12 }}
+              items={[
+                {
+                  key: "tools",
+                  label: "工具调用",
+                  children: toolInvocations.map((part, i) => {
                     const toolName = getToolName(part);
                     const toolStatus = getToolStatus(part);
-                    const input = "input" in part ? (part as { input?: unknown }).input : undefined;
                     const output = "output" in part ? (part as { output?: unknown }).output : undefined;
 
                     return (
-                      <div key={key} style={{ marginBottom: 8 }}>
+                      <div key={i} style={{ marginBottom: 8 }}>
                         <Space>
-                          <Tag color={toolStatus === "calling" ? "processing" : toolStatus === "error" ? "error" : "success"}>
+                          <Tag
+                            color={
+                              toolStatus === "calling"
+                                ? "processing"
+                                : toolStatus === "error"
+                                  ? "error"
+                                  : "success"
+                            }
+                          >
                             {toolName}
                           </Tag>
                           <span style={{ fontSize: 12, color: "#999" }}>
-                            {toolStatus === "calling" ? "调用中..." : toolStatus === "error" ? "失败" : "完成"}
+                            {toolStatus === "calling"
+                              ? "调用中..."
+                              : toolStatus === "error"
+                                ? "失败"
+                                : "完成"}
                           </span>
                         </Space>
                         {output !== undefined && (
-                          <pre style={{ fontSize: 10, margin: "4px 0", background: "#f5f5f5", padding: 4, borderRadius: 4, maxHeight: 100, overflow: "auto" }}>
+                          <pre
+                            style={{
+                              fontSize: 10,
+                              margin: "4px 0",
+                              background: "#fff",
+                              padding: 4,
+                              borderRadius: 4,
+                              maxHeight: 100,
+                              overflow: "auto",
+                            }}
+                          >
                             {JSON.stringify(output, null, 2)}
                           </pre>
                         )}
                       </div>
                     );
                   }),
-                )}
-              </Collapse.Panel>
-            </Collapse>
+                },
+              ]}
+            />
           )}
 
-          {/* Sources */}
-          {sources.length > 0 && (
-            <Card size="small" title="参考资料">
+          {/* 参考资料 - 仅显示最后一条助手消息的 */}
+          {!isUser && sources.length > 0 && msg === messages[messages.length - 1] && (
+            <Card size="small" title="参考资料" style={{ marginTop: 12 }}>
               {sources.map((src, i) => (
                 <div key={i} style={{ marginBottom: 8 }}>
                   <Typography.Text strong>
@@ -359,32 +299,115 @@ export default function ChatPage() {
               ))}
             </Card>
           )}
+        </div>
+      );
+    },
+    [messages, getToolInvocations, sources]
+  );
 
-          {error && <Typography.Text type="danger">错误: {error.message}</Typography.Text>}
+  // 转换消息为 Bubble 格式
+  const bubbleItems = messages.map((msg) => {
+    const textContent = msg.parts
+      ?.filter((p) => p.type === "text")
+      .map((p) => (p as { text: string }).text)
+      .join("") || "";
 
-          {/* Input */}
-          <Space.Compact style={{ width: "100%" }}>
-            <Input
-              placeholder="输入你的问题..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onPressEnter={handleSendMessage}
-              disabled={!selectedConversation || isLoading}
-            />
-            <Button type="primary" onClick={handleSendMessage} disabled={!selectedConversation || isLoading || !input.trim()}>
-              发送
-            </Button>
-          </Space.Compact>
-        </Space>
+    return {
+      key: msg.id,
+      role: msg.role,
+      content: textContent,
+    };
+  });
+
+  return (
+    <div style={{ height: "calc(100vh - 64px)", display: "flex", gap: 16, padding: 16 }}>
+      {/* 左侧会话列表 */}
+      <Card style={{ width: 280, flexShrink: 0 }} styles={{ body: { padding: 12, height: "100%", display: "flex", flexDirection: "column" } }}>
+        <Conversations
+          activeKey={selectedConversation?.id}
+          items={conversationItems}
+          onActiveChange={(key) => {
+            const conv = conversations.find((c) => c.id === key);
+            if (conv) setSelectedConversation(conv);
+          }}
+          menu={() => [{ label: "删除", key: "delete" }]}
+          onMenuClick={(conv, info) => {
+            if (info.key === "delete") {
+              deleteConversation(conv.key as string);
+            }
+          }}
+        />
       </Card>
 
-      {/* Edit Conversation Modal */}
-      <Modal
-        title="会话设置"
-        open={editModalOpen}
-        onCancel={() => setEditModalOpen(false)}
-        footer={null}
-      >
+      {/* 右侧聊天区域 */}
+      <Card style={{ flex: 1, display: "flex", flexDirection: "column" }} styles={{ body: { flex: 1, display: "flex", flexDirection: "column", padding: 16 } }}>
+        {/* 标题栏 */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <Typography.Title level={4} style={{ margin: 0 }}>
+            {selectedConversation?.title || "选择一个会话"}
+          </Typography.Title>
+          {selectedConversation && (
+            <button
+              type="button"
+              onClick={() => {
+                editForm.setFieldsValue({
+                  title: selectedConversation.title || "",
+                  kbId: selectedConversation.kbId || undefined,
+                  systemPrompt: selectedConversation.systemPrompt || "",
+                });
+                setDrawerOpen(true);
+              }}
+              style={{
+                padding: "4px 12px",
+                background: "#fff",
+                border: "1px solid #d9d9d9",
+                borderRadius: 6,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <SettingOutlined /> 设置
+            </button>
+          )}
+        </div>
+
+        {/* 知识库标签 */}
+        {selectedConversation?.kb && (
+          <Tag color="blue" style={{ marginBottom: 16 }}>
+            知识库: {selectedConversation.kb.name}
+          </Tag>
+        )}
+
+        {/* 消息列表 */}
+        <div style={{ flex: 1, overflow: "auto", marginBottom: 16 }}>
+          {!selectedConversation && (
+            <Typography.Text type="secondary">请选择或创建一个会话开始聊天</Typography.Text>
+          )}
+          {bubbleItems.length === 0 && selectedConversation && (
+            <Typography.Text type="secondary">开始对话...</Typography.Text>
+          )}
+          {bubbleItems.map((item) => renderMessage(item as { content: string; role: string; key?: string }))}
+          {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
+            <div style={{ textAlign: "center", padding: 16 }}>
+              <Tag color="processing">思考中...</Tag>
+            </div>
+          )}
+          {error && <Typography.Text type="danger">错误: {error.message}</Typography.Text>}
+        </div>
+
+        {/* 输入框 */}
+        <Sender
+          loading={isLoading}
+          disabled={!selectedConversation}
+          onSubmit={handleSend}
+          placeholder="输入你的问题..."
+        />
+      </Card>
+
+      {/* 设置抽屉 */}
+      <Drawer title="会话设置" open={drawerOpen} onClose={() => setDrawerOpen(false)} width={400}>
         <Form form={editForm} layout="vertical" onFinish={updateConversation}>
           <Form.Item name="title" label="会话标题">
             <Input placeholder="输入会话标题" />
@@ -406,14 +429,36 @@ export default function ChatPage() {
 
           <Form.Item>
             <Space>
-              <Button type="primary" htmlType="submit">
+              <button
+                type="submit"
+                style={{
+                  padding: "8px 16px",
+                  background: "#1677ff",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
                 保存
-              </Button>
-              <Button onClick={() => setEditModalOpen(false)}>取消</Button>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                style={{
+                  padding: "8px 16px",
+                  background: "#fff",
+                  border: "1px solid #d9d9d9",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                取消
+              </button>
             </Space>
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </div>
   );
 }
